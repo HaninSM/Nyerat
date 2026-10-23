@@ -1,0 +1,1451 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+  <title>Nyerat.AI — Air-Writing Aksara Jawa (MediaPipe 60 FPS)</title>
+
+  <!-- Tailwind CSS CDN with Plugins -->
+  <script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
+  <script>
+    tailwind.config = {
+      theme: {
+        extend: {
+          fontFamily: {
+            yatra: ['"Yatra One"', 'cursive', 'serif'],
+            sans: ['"Plus Jakarta Sans"', 'sans-serif'],
+          },
+          colors: {
+            wayang: {
+              gold: '#E5B94E',
+              brightGold: '#FFE57F',
+              bronze: '#C28B36',
+              crimson: '#881313',
+              darkRed: '#4A0808',
+              paper: '#EAD7B2',
+              bgDark: '#0a0705'
+            },
+            neon: {
+              cyan: '#00F0FF',
+              emerald: '#00FF88',
+              magenta: '#FF2E93',
+              gold: '#FFD700',
+              orange: '#FF7B00'
+            }
+          }
+        }
+      }
+    };
+  </script>
+
+  <!-- Google Fonts -->
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800;900&family=Yatra+One&display=swap" rel="stylesheet">
+
+  <!-- MediaPipe Classic Standalone Solution (Sama Persis seperti Parwa: 60 FPS Native WebAssembly) -->
+  <script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js" crossorigin="anonymous"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@mediapipe/hands/hands.js" crossorigin="anonymous"></script>
+
+  <style>
+    /* Full Viewport Reset */
+    * {
+      box-sizing: border-box;
+      -webkit-tap-highlight-color: transparent;
+      user-select: none;
+    }
+
+    body, html {
+      margin: 0;
+      padding: 0;
+      width: 100vw;
+      height: 100vh;
+      overflow: hidden;
+      background-color: #07090e;
+      font-family: 'Plus Jakarta Sans', sans-serif;
+      color: #fff;
+    }
+
+    /* Floating Glass HUD Panels */
+    .glass-hud {
+      background: rgba(13, 17, 28, 0.78);
+      backdrop-filter: blur(14px);
+      -webkit-backdrop-filter: blur(14px);
+      border: 1px solid rgba(229, 185, 78, 0.28);
+      box-shadow: 0 12px 35px rgba(0, 0, 0, 0.65), inset 0 1px 1px rgba(255, 255, 255, 0.12);
+    }
+
+    .glass-hud-gold {
+      background: rgba(26, 18, 8, 0.82);
+      backdrop-filter: blur(14px);
+      border: 1px solid rgba(255, 229, 127, 0.45);
+      box-shadow: 0 8px 30px rgba(0, 0, 0, 0.7), 0 0 15px rgba(229, 185, 78, 0.25);
+    }
+
+    /* Ornate Button Effects */
+    .btn-ornate {
+      transition: all 0.2s cubic-bezier(0.16, 1, 0.3, 1);
+    }
+    .btn-ornate:hover {
+      transform: translateY(-2px);
+      box-shadow: 0 0 18px rgba(255, 229, 127, 0.5);
+    }
+    .btn-ornate:active {
+      transform: translateY(1px);
+    }
+
+    /* Training Bounding Box Glow */
+    .practice-box {
+      border: 2px dashed rgba(255, 215, 0, 0.5);
+      box-shadow: inset 0 0 40px rgba(255, 215, 0, 0.08), 0 0 25px rgba(0, 240, 255, 0.15);
+      pointer-events: none;
+    }
+
+    /* Corner Bracket Accents */
+    .bracket-corner {
+      position: absolute;
+      width: 24px;
+      height: 24px;
+      border-color: #FFD700;
+      border-style: solid;
+      pointer-events: none;
+    }
+    .bracket-tl { top: -2px; left: -2px; border-width: 4px 0 0 4px; }
+    .bracket-tr { top: -2px; right: -2px; border-width: 4px 4px 0 0; }
+    .bracket-bl { bottom: -2px; left: -2px; border-width: 0 0 4px 4px; }
+    .bracket-br { bottom: -2px; right: -2px; border-width: 0 4px 4px 0; }
+
+    /* Pencil Animation Pulse */
+    @keyframes pencilBob {
+      0%, 100% { transform: translate(-50%, -50%) rotate(-15deg) scale(1); }
+      50% { transform: translate(-50%, -50%) rotate(-5deg) scale(1.08); }
+    }
+    .pencil-animating {
+      animation: pencilBob 0.6s infinite ease-in-out;
+    }
+
+    /* Pulse Glow */
+    @keyframes pulseGlow {
+      0%, 100% { opacity: 0.8; transform: scale(1); }
+      50% { opacity: 1; transform: scale(1.04); }
+    }
+    .pulse-glow {
+      animation: pulseGlow 2s infinite ease-in-out;
+    }
+  </style>
+</head>
+<body class="relative w-screen h-screen overflow-hidden select-none">
+
+  <!-- ==================== 1. FULLSCREEN STAGE VIEWPORT ==================== -->
+  <div id="stage-viewport" class="absolute inset-0 w-full h-full overflow-hidden bg-black">
+
+    <!-- Mirrored Webcam Video Element (100% Fullscreen, Clear & Vivid) -->
+    <video id="webcam-feed"
+           class="absolute inset-0 w-full h-full object-cover -scale-x-100 z-0 transition-opacity duration-500 opacity-95"
+           playsinline muted autoplay></video>
+
+    <!-- Ambient Subtle Stage Vignette & Floor Glow -->
+    <div class="absolute inset-0 pointer-events-none z-10 bg-radial-vignette"
+         style="background: radial-gradient(circle at 50% 50%, rgba(0,0,0,0.1) 0%, rgba(10,13,20,0.55) 75%, rgba(5,7,12,0.92) 100%);"></div>
+
+    <!-- Hand Skeleton Debug Canvas (Mirrored) -->
+    <canvas id="hand-canvas" class="absolute inset-0 w-full h-full object-cover -scale-x-100 z-20 pointer-events-none"></canvas>
+
+    <!-- Air-Writing Kaligrafi Ink Canvas (Screen Space, Smooth Bézier) -->
+    <canvas id="ink-canvas" class="absolute inset-0 w-full h-full object-cover z-30 pointer-events-none"></canvas>
+
+    <!-- Center Practice Bounding Box & Template Layer -->
+    <div id="practice-area-wrap" class="absolute inset-0 z-25 flex items-center justify-center pointer-events-none">
+      <div id="practice-box" class="relative w-[86vw] max-w-[850px] h-[65vh] max-h-[520px] rounded-2xl practice-box bg-slate-950/20 backdrop-blur-[2px] transition-all duration-300">
+        
+        <!-- Corner Brackets -->
+        <div class="bracket-corner bracket-tl rounded-tl-lg"></div>
+        <div class="bracket-corner bracket-tr rounded-tr-lg"></div>
+        <div class="bracket-corner bracket-bl rounded-bl-lg"></div>
+        <div class="bracket-corner bracket-br rounded-br-lg"></div>
+
+        <!-- Box Header Label -->
+        <div class="absolute -top-7 left-1/2 -translate-x-1/2 px-4 py-1 rounded-full bg-amber-500/90 text-black text-xs font-black tracking-widest uppercase shadow-lg shadow-amber-500/30 flex items-center gap-2">
+          <span class="w-2 h-2 rounded-full bg-black animate-ping"></span>
+          AREA LATIHAN (TULIS DI DALAM KOTAK)
+        </div>
+
+        <!-- SVG Aksara Guidance Template (Neon Cyan / Gold Glowing Path) -->
+        <svg id="aksara-svg" class="w-full h-full p-8 transition-all duration-500" viewBox="0 0 1000 625">
+          <defs>
+            <filter id="neon-glow" x="-20%" y="-20%" width="140%" height="140%">
+              <feGaussianBlur stdDeviation="7" result="blur1" />
+              <feGaussianBlur stdDeviation="16" result="blur2" />
+              <feMerge>
+                <feMergeNode in="blur2" />
+                <feMergeNode in="blur1" />
+                <feMergeNode in="SourceGraphic" />
+              </feMerge>
+            </filter>
+            <!-- Gold Metallic Gradient -->
+            <linearGradient id="gold-grad" x1="0%" y1="0%" x2="100%" y2="100%">
+              <stop offset="0%" stop-color="#FFE57F"/>
+              <stop offset="50%" stop-color="#E5B94E"/>
+              <stop offset="100%" stop-color="#C28B36"/>
+            </linearGradient>
+          </defs>
+
+          <!-- Guide Background Trace (Dark Cyan Base) -->
+          <g id="svg-guide-group" opacity="0.45">
+            <!-- Dynamic Paths rendered here -->
+          </g>
+
+          <!-- Animated Demonstration Trace (Phase 1) -->
+          <g id="svg-demo-group">
+            <!-- Dynamic Demo animated path rendered here -->
+          </g>
+        </svg>
+
+        <!-- Virtual Pencil Element for Phase 1 Demo (YouTube 2:31 reference) -->
+        <div id="virtual-pencil" class="absolute hidden pointer-events-none z-40 transition-transform duration-75 text-3xl filter drop-shadow-[0_0_12px_rgba(255,229,127,0.9)]">
+          ✏️
+          <span id="pencil-tooltip" class="absolute left-7 top-0 text-[11px] font-bold px-2 py-0.5 rounded bg-amber-400 text-black whitespace-nowrap shadow-md">
+            Langkah 1
+          </span>
+        </div>
+
+        <!-- Dynamic Feedback Instruction Banner Inside Practice Box -->
+        <div id="box-status-banner" class="absolute bottom-4 left-1/2 -translate-x-1/2 px-5 py-1.5 rounded-xl glass-hud text-xs font-semibold text-slate-200 flex items-center gap-2 border border-amber-400/30">
+          <span id="box-status-dot" class="w-2.5 h-2.5 rounded-full bg-cyan-400 animate-pulse"></span>
+          <span id="box-status-text">Siap Menulis: Angkat 1 Jari Telunjuk untuk Menggores Tinta</span>
+        </div>
+      </div>
+    </div>
+
+    <!-- Active Hover / Pointer Reticle -->
+    <div id="hand-pointer-reticle" class="absolute hidden pointer-events-none z-35 -translate-x-1/2 -translate-y-1/2 transition-transform duration-75">
+      <div class="relative flex items-center justify-center">
+        <div class="w-12 h-12 rounded-full border-2 border-cyan-400/80 animate-ping"></div>
+        <div class="absolute w-6 h-6 rounded-full bg-cyan-400/40 border-2 border-white shadow-[0_0_15px_#00F0FF] flex items-center justify-center text-[10px] font-bold text-black">
+          •
+        </div>
+        <div id="reticle-label" class="absolute -bottom-6 left-1/2 -translate-x-1/2 px-2 py-0.5 rounded bg-black/80 text-[10px] font-bold text-cyan-300 border border-cyan-400/40 whitespace-nowrap">
+          HOVER
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ==================== 2. FLOATING TOP HUD NAVBAR ==================== -->
+  <header class="absolute top-4 inset-x-4 z-40 flex items-center justify-between gap-3 pointer-events-none">
+    
+    <!-- Left Brand & Status Card -->
+    <div class="glass-hud px-4 py-2 rounded-2xl flex items-center gap-3 pointer-events-auto">
+      <div class="w-9 h-9 rounded-xl bg-gradient-to-tr from-amber-600 to-yellow-300 flex items-center justify-center text-slate-950 font-black text-xl shadow-md shadow-amber-500/20 font-yatra">
+        ꦚ
+      </div>
+      <div>
+        <div class="flex items-center gap-2">
+          <h1 class="text-sm font-extrabold tracking-wide text-amber-300 font-yatra">NYERAT.AI</h1>
+          <span class="px-1.5 py-0.5 rounded text-[10px] font-bold bg-amber-400/20 text-amber-300 border border-amber-400/40">AIR-WRITING</span>
+        </div>
+        <div class="flex items-center gap-2 text-[11px] text-slate-300 font-medium">
+          <span class="inline-flex items-center gap-1">
+            <span id="cam-dot" class="w-2 h-2 rounded-full bg-emerald-400 animate-pulse"></span>
+            <span id="fps-counter">60 FPS</span>
+          </span>
+          <span class="text-slate-500">•</span>
+          <span id="camera-status-label" class="text-emerald-400 font-semibold">Kamera Aktif</span>
+        </div>
+      </div>
+    </div>
+
+    <!-- Center Interactive Control Ribbon -->
+    <div class="glass-hud px-3 py-1.5 rounded-2xl flex items-center gap-2 pointer-events-auto">
+      
+      <!-- Prev Button -->
+      <button id="btn-prev" class="btn-ornate px-3 py-2 rounded-xl bg-slate-800/80 hover:bg-slate-700 text-slate-200 text-xs font-bold flex items-center gap-1 border border-slate-700">
+        <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M15 19l-7-7 7-7"/></svg>
+        <span>PREV <kbd class="text-[10px] text-slate-400">[Q]</kbd></span>
+      </button>
+
+      <!-- Aksara Quick Selector Dropdown -->
+      <div class="relative">
+        <select id="aksara-select" class="appearance-none bg-amber-500/20 hover:bg-amber-500/30 text-amber-300 text-xs font-extrabold px-4 py-2 pr-7 rounded-xl border border-amber-400/50 cursor-pointer focus:outline-none">
+          <!-- Populated dynamically: 20 Aksara Nglegena -->
+        </select>
+        <div class="absolute right-2 top-1/2 -translate-y-1/2 pointer-events-none text-amber-400 text-xs">▼</div>
+      </div>
+
+      <!-- Next Button -->
+      <button id="btn-next" class="btn-ornate px-3 py-2 rounded-xl bg-slate-800/80 hover:bg-slate-700 text-slate-200 text-xs font-bold flex items-center gap-1 border border-slate-700">
+        <span>NEXT <kbd class="text-[10px] text-slate-400">[W]</kbd></span>
+        <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M9 5l7 7-7 7"/></svg>
+      </button>
+
+      <div class="h-6 w-px bg-slate-700 mx-1"></div>
+
+      <!-- Demo Pensil Button (YouTube 2:31 reference) -->
+      <button id="btn-demo" class="btn-ornate px-3.5 py-2 rounded-xl bg-gradient-to-r from-amber-500 to-yellow-500 hover:from-amber-400 hover:to-yellow-400 text-slate-950 text-xs font-extrabold flex items-center gap-1.5 shadow-md shadow-amber-500/20">
+        <span>✏️ DEMO PENSIL <kbd class="text-[10px] opacity-70">[P]</kbd></span>
+      </button>
+
+      <!-- Evaluasi Button (Orange Glow) -->
+      <button id="btn-eval" class="btn-ornate px-3.5 py-2 rounded-xl bg-orange-600 hover:bg-orange-500 text-white text-xs font-extrabold flex items-center gap-1.5 shadow-md shadow-orange-600/30">
+        <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>
+        <span>EVALUASI <kbd class="text-[10px] opacity-80">[E]</kbd></span>
+      </button>
+
+      <!-- Bersih Canvas Button (Red) -->
+      <button id="btn-clear" class="btn-ornate px-3 py-2 rounded-xl bg-rose-600/90 hover:bg-rose-500 text-white text-xs font-bold flex items-center gap-1 shadow-md shadow-rose-600/20">
+        <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"/></svg>
+        <span>BERSIH <kbd class="text-[10px] opacity-80">[C]</kbd></span>
+      </button>
+
+      <!-- Panduan Template Toggle Button -->
+      <button id="btn-guide-toggle" class="btn-ornate px-3 py-2 rounded-xl bg-cyan-700/80 hover:bg-cyan-600 text-white text-xs font-bold flex items-center gap-1 border border-cyan-500/40">
+        <span>GUIDE: <strong id="guide-status-text">ON</strong> <kbd class="text-[10px] opacity-80">[G]</kbd></span>
+      </button>
+    </div>
+
+    <!-- Right Controls: Color Palette, Sound & Fullscreen -->
+    <div class="glass-hud px-3 py-1.5 rounded-2xl flex items-center gap-2 pointer-events-auto">
+      
+      <!-- Color Palette Picker -->
+      <div class="flex items-center gap-1 px-2 py-1 rounded-xl bg-slate-900/80 border border-slate-700/60">
+        <span class="text-[10px] font-bold text-slate-400 mr-1">WARNA:</span>
+        <button class="color-btn w-5 h-5 rounded-full bg-[#00F0FF] border-2 border-white scale-110 shadow-[0_0_8px_#00F0FF]" data-color="#00F0FF" title="Cyan Neon"></button>
+        <button class="color-btn w-5 h-5 rounded-full bg-[#FFE57F] border border-white/40 hover:scale-110 transition-transform" data-color="#FFE57F" title="Emas Wayang"></button>
+        <button class="color-btn w-5 h-5 rounded-full bg-[#00FF88] border border-white/40 hover:scale-110 transition-transform" data-color="#00FF88" title="Hijau Neon"></button>
+        <button class="color-btn w-5 h-5 rounded-full bg-[#FF2E93] border border-white/40 hover:scale-110 transition-transform" data-color="#FF2E93" title="Magenta"></button>
+        <button class="color-btn w-5 h-5 rounded-full bg-[#FFFFFF] border border-white/40 hover:scale-110 transition-transform" data-color="#FFFFFF" title="Putih"></button>
+      </div>
+
+      <!-- Audio Mute/Unmute Button -->
+      <button id="btn-audio" class="p-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-amber-300 border border-slate-700 btn-ornate" title="Suara Efek">
+        <svg id="icon-sound-on" class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15.536 8.464a5 5 0 010 7.072m2.828-9.9a9 9 0 010 12.728M5.586 15H4a1 1 0 01-1-1v-4a1 1 0 011-1h1.586l4.707-4.707C10.923 3.663 12 4.109 12 5v14c0 .891-1.077 1.337-1.707.707L5.586 15z"/></svg>
+        <svg id="icon-sound-off" class="w-4 h-4 hidden text-rose-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5.586 15H4a1 1 0 01-1-1v-4a1 1 0 011-1h1.586l4.707-4.707C10.923 3.663 12 4.109 12 5v14c0 .891-1.077 1.337-1.707.707L5.586 15z"/><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17 14l2-2m0 0l2-2m-2 2l-2-2m2 2l2 2"/></svg>
+      </button>
+
+      <!-- Fullscreen Toggle -->
+      <button id="btn-fullscreen" class="p-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 btn-ornate" title="Layar Penuh">
+        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 8V4m0 0h4M4 4l5 5m11-1V4m0 0h-4m4 0l-5 5M4 16v4m0 0h4m-4 0l5-5m11 5l-5-5m5 5v-4m0 4h-4"/></svg>
+      </button>
+    </div>
+  </header>
+
+  <!-- ==================== 3. FLOATING BOTTOM HUD CARDS ==================== -->
+  <footer class="absolute bottom-4 inset-x-4 z-40 flex items-end justify-between gap-4 pointer-events-none">
+    
+    <!-- Bottom Left Card: Current Aksara & Philosophy -->
+    <div class="glass-hud-gold p-4 rounded-2xl max-w-sm pointer-events-auto border-l-4 border-l-amber-400">
+      <div class="flex items-center gap-3">
+        <div id="card-glyph" class="text-4xl font-yatra text-amber-300 filter drop-shadow-[0_0_12px_rgba(255,229,127,0.7)]">
+          ꦲ
+        </div>
+        <div>
+          <div class="flex items-center gap-2">
+            <h2 id="card-title" class="text-lg font-black text-white font-yatra tracking-wide">Aksara [1/20]: Ha</h2>
+            <span class="px-2 py-0.5 rounded-full text-[10px] font-extrabold bg-amber-400/20 text-amber-300 border border-amber-400/30">Nglegena</span>
+          </div>
+          <p id="card-philosophy" class="text-xs text-amber-200/90 italic mt-0.5 leading-snug">
+            "Hana hurip wening suci (Ada kehidupan suci)"
+          </p>
+        </div>
+      </div>
+      <div class="mt-3 pt-2.5 border-t border-amber-500/20 flex items-center justify-between text-[11px] text-slate-300">
+        <span id="card-stroke-info">Urutan: 1 Goresan Berkelanjutan</span>
+        <button id="btn-replay-demo" class="text-amber-400 font-bold hover:underline flex items-center gap-1">
+          <span>Putar Ulang Animasi</span> ↺
+        </button>
+      </div>
+    </div>
+
+    <!-- Live Writing Mode Pill (Center Bottom) -->
+    <div class="glass-hud px-4 py-2 rounded-2xl flex items-center gap-2 pointer-events-auto border border-amber-400/30">
+      <span class="text-xs text-slate-400 font-bold">MODE:</span>
+      <span id="badge-mode" class="px-2.5 py-1 rounded-lg text-xs font-black bg-cyan-500/20 text-cyan-300 border border-cyan-400/50 flex items-center gap-1.5">
+        <span class="w-2 h-2 rounded-full bg-cyan-400 animate-ping"></span>
+        STANDBY / SIAP
+      </span>
+      <span class="text-slate-500 text-xs mx-1">|</span>
+      <span class="text-xs text-slate-400 font-bold">GORESAN:</span>
+      <span id="stroke-points-count" class="text-xs font-black text-amber-300">0 titik</span>
+    </div>
+
+    <!-- Bottom Right Card: Gesture Guide (Sama Persis seperti Panduan Parwa) -->
+    <div class="glass-hud p-4 rounded-2xl max-w-sm pointer-events-auto border-r-4 border-r-cyan-400">
+      <div class="flex items-center justify-between pb-2 mb-2 border-b border-slate-700/60">
+        <h3 class="text-xs font-extrabold tracking-wider text-cyan-300 uppercase flex items-center gap-1.5">
+          <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>
+          PANDUAN GESTUR TANGAN:
+        </h3>
+        <span class="text-[10px] text-slate-400">Tangan Kanan</span>
+      </div>
+      <ul class="space-y-1.5 text-xs text-slate-200">
+        <li class="flex items-center gap-2">
+          <span class="w-5 text-center text-sm">☝️</span>
+          <span><strong>1 Jari (Telunjuk):</strong> Menulis Kaligrafi Tinta Udara</span>
+        </li>
+        <li class="flex items-center gap-2">
+          <span class="w-5 text-center text-sm">✌️</span>
+          <span class="text-cyan-200"><strong>2 Jari (Telunjuk + Tengah):</strong> Angkat Pena (Hover / Tanpa Menyeret)</span>
+        </li>
+        <li class="flex items-center gap-2">
+          <span class="w-5 text-center text-sm">🖐️</span>
+          <span><strong>5 Jari Terbuka:</strong> Bersihkan Seluruh Kanvas</span>
+        </li>
+        <li class="flex items-center gap-2">
+          <span class="w-5 text-center text-sm">👍</span>
+          <span><strong>Ibu Jari (Thumbs Up):</strong> Kunci & Lanjut Aksara Baru</span>
+        </li>
+      </ul>
+      <div class="mt-2.5 pt-2 border-t border-slate-700/50 flex items-center justify-between text-[10px] text-slate-400">
+        <span>Shortcut: <kbd class="px-1 py-0.5 rounded bg-slate-800 text-amber-300 font-mono">[C]</kbd> Bersih</span>
+        <span><kbd class="px-1 py-0.5 rounded bg-slate-800 text-amber-300 font-mono">[E]</kbd> Nilai</span>
+        <span><kbd class="px-1 py-0.5 rounded bg-slate-800 text-amber-300 font-mono">[P]</kbd> Pensil</span>
+      </div>
+    </div>
+  </footer>
+
+  <!-- ==================== 4. EVALUATION MODAL ==================== -->
+  <div id="eval-modal" class="fixed inset-0 z-50 bg-black/80 backdrop-blur-md hidden items-center justify-center p-4 transition-all">
+    <div class="glass-hud-gold w-full max-w-md p-6 rounded-3xl border-2 border-amber-400/50 shadow-2xl relative text-center">
+      
+      <!-- Close Button -->
+      <button id="modal-close" class="absolute right-4 top-4 text-slate-400 hover:text-white p-1 rounded-full hover:bg-slate-800">
+        ✕
+      </button>
+
+      <div class="w-16 h-16 mx-auto rounded-2xl bg-amber-500/20 border-2 border-amber-400 flex items-center justify-center text-3xl font-yatra text-amber-300 mb-3 shadow-lg shadow-amber-500/30">
+        ꦲ
+      </div>
+
+      <h3 class="text-xl font-black text-amber-300 font-yatra">Hasil Evaluasi Kemiripan AI</h3>
+      <p id="eval-subtitle" class="text-xs text-slate-300 mt-1">Aksara Ha (ꦲ) — Air-Writing Stroke Analysis</p>
+
+      <!-- Score Ring Gauge -->
+      <div class="my-6 flex flex-col items-center justify-center">
+        <div class="relative w-32 h-32 flex items-center justify-center">
+          <svg class="w-full h-full -rotate-90" viewBox="0 0 100 100">
+            <circle cx="50" cy="50" r="40" stroke="rgba(255,255,255,0.1)" stroke-width="8" fill="none"/>
+            <circle id="score-circle" cx="50" cy="50" r="40" stroke="#FFE57F" stroke-width="8" stroke-dasharray="251.2" stroke-dashoffset="30" stroke-linecap="round" fill="none" class="transition-all duration-1000"/>
+          </svg>
+          <div class="absolute inset-0 flex flex-col items-center justify-center">
+            <span id="score-text" class="text-3xl font-black text-white font-yatra">92%</span>
+            <span class="text-[10px] font-bold text-amber-400 uppercase tracking-widest">Sangat Mirip</span>
+          </div>
+        </div>
+      </div>
+
+      <!-- Detail Feedback List -->
+      <div class="space-y-2 text-left bg-slate-900/70 p-3.5 rounded-2xl border border-slate-700/60 mb-5 text-xs">
+        <div class="flex items-center justify-between text-slate-300">
+          <span>Kelengkapan Lengkungan:</span>
+          <span id="eval-stat-curve" class="font-bold text-emerald-400">Lengkap (100%)</span>
+        </div>
+        <div class="flex items-center justify-between text-slate-300">
+          <span>Kelancaran Seretan (*Smoothness*):</span>
+          <span id="eval-stat-smooth" class="font-bold text-cyan-400">Sangat Halus</span>
+        </div>
+        <div class="flex items-center justify-between text-slate-300">
+          <span>Presisi di Dalam Kotak:</span>
+          <span id="eval-stat-box" class="font-bold text-amber-400">95% Optimal</span>
+        </div>
+      </div>
+
+      <!-- Action Buttons -->
+      <div class="grid grid-cols-2 gap-3">
+        <button id="modal-retry" class="btn-ornate py-3 rounded-xl bg-slate-800 hover:bg-slate-700 text-white font-bold text-xs border border-slate-600">
+          Ulangi Latihan ↺
+        </button>
+        <button id="modal-next" class="btn-ornate py-3 rounded-xl bg-gradient-to-r from-amber-500 to-yellow-500 text-slate-950 font-black text-xs shadow-lg shadow-amber-500/30">
+          Aksara Berikutnya ➔
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Toast Notification Banner -->
+  <div id="toast-banner" class="fixed top-20 left-1/2 -translate-x-1/2 z-50 px-5 py-2.5 rounded-2xl glass-hud-gold text-xs font-bold text-amber-300 border border-amber-400/50 shadow-2xl transition-all duration-300 opacity-0 -translate-y-4 pointer-events-none flex items-center gap-2">
+    <span id="toast-icon">✨</span>
+    <span id="toast-text">Pesan notifikasi</span>
+  </div>
+
+  <!-- Camera Permission & Activation Modal (Muncul jika kamera belum diizinkan) -->
+  <div id="camera-modal" class="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-md transition-all duration-300">
+    <div class="glass-hud-gold p-8 rounded-3xl max-w-sm text-center border-2 border-amber-400/70 shadow-2xl">
+      <div class="w-16 h-16 mx-auto mb-4 rounded-2xl bg-amber-500/20 border border-amber-400 flex items-center justify-center text-3xl shadow-lg shadow-amber-500/30">
+        📷
+      </div>
+      <h2 class="text-xl font-black text-amber-300 font-yatra">Aktifkan Kamera</h2>
+      <p class="text-xs text-slate-300 my-3 leading-relaxed">
+        Nyerat.AI membutuhkan akses kamera web laptop/PC Anda untuk mendeteksi gerakan jari di udara.
+      </p>
+      <div id="camera-error-desc" class="hidden mb-3 p-2.5 rounded-xl bg-rose-500/20 border border-rose-500/50 text-rose-200 text-xs font-medium"></div>
+      <button id="btn-start-camera" class="btn-ornate w-full py-3.5 rounded-2xl bg-gradient-to-r from-amber-500 to-yellow-400 text-slate-950 font-black text-xs uppercase tracking-wider shadow-lg shadow-amber-500/30 flex items-center justify-center gap-2 cursor-pointer">
+        <span>Izinkan & Mulai Kamera</span> ➔
+      </button>
+    </div>
+  </div>
+
+  <!-- ==================== 5. COMPLETE APPLICATION JAVASCRIPT ==================== -->
+  <script>
+    /* ==========================================================================
+       A. DATA 20 AKSARA NGLEGENA & PATH VECTOR KOORDINAT
+       ========================================================================== */
+    const AKSARA_DATA = [
+      {
+        name: "Ha",
+        glyph: "ꦲ",
+        category: "1/20",
+        philosophy: "Hana hurip wening suci (Ada kehidupan suci)",
+        paths: [
+          "M 290,410 C 290,260 365,220 425,245 C 465,265 470,370 470,400 C 470,260 545,220 605,245 C 645,265 650,370 650,400 C 650,260 720,220 770,245 C 795,265 790,380 755,420"
+        ],
+        steps: [
+          "Tarik lengkung kiri pertama naik-turun, lanjutkan jembatan tengah kontinu, lalu selesaikan kaki kanan."
+        ]
+      },
+      {
+        name: "Na",
+        glyph: "ꦤ",
+        category: "2/20",
+        philosophy: "Nur candra kanta (Cahaya kebenaran ilahi)",
+        paths: [
+          "M 310,410 C 310,260 375,220 435,245 C 475,265 480,370 480,400 C 480,260 550,220 610,245 C 660,265 660,340 660,390 L 740,390 C 760,390 760,430 730,430"
+        ],
+        steps: [
+          "Tarik lengkung kiri, sambung jembatan tengah, lalu seret garis mendatar ke kanan dan kunci kaki terminal."
+        ]
+      },
+      {
+        name: "Ca",
+        glyph: "ꦕ",
+        category: "3/20",
+        philosophy: "Cipta wening mandiri (Kejernihan pikiran sejati)",
+        paths: [
+          "M 320,410 C 320,250 410,220 480,245 C 550,270 550,360 550,400 C 550,260 630,220 710,250 C 760,280 770,360 720,410 C 670,440 600,410 600,340 C 600,280 670,280 710,330"
+        ],
+        steps: [
+          "Tarik lengkung kiri, sambung badan aksara, lalu buat lingkaran seret loop melingkar di kanan bawah."
+        ]
+      },
+      {
+        name: "Ra",
+        glyph: "ꦫ",
+        category: "4/20",
+        philosophy: "Rasa sejati jiwa (Kepekaan nurani ruhani)",
+        paths: [
+          "M 350,410 C 350,260 425,220 495,245 C 555,265 560,370 560,400 C 560,260 635,220 705,245 C 750,265 760,370 760,420 C 760,450 725,450 715,420"
+        ],
+        steps: [
+          "Tarik lengkungan pertama di kiri, sambung lengkungan kedua di kanan, lalu turunkan ekornya."
+        ]
+      },
+      {
+        name: "Ka",
+        glyph: "ꦏ",
+        category: "5/20",
+        philosophy: "Karsa luhur gesang (Kehendak suci membela kebenaran)",
+        paths: [
+          "M 300,410 C 300,260 370,220 435,245 C 475,265 480,360 480,400 C 480,270 540,240 595,275 C 645,305 645,395 645,410 C 645,260 720,220 770,245 C 795,265 790,380 770,420"
+        ],
+        steps: [
+          "Tarik lengkung kaki kiri, buat simpul silang tengah yang khas, lalu selesaikan kaki kanan."
+        ]
+      },
+      {
+        name: "Da",
+        glyph: "ꦢ",
+        category: "6/20",
+        philosophy: "Dhasaring gesang (Pondasi kehidupan berbudi luhur)",
+        paths: [
+          "M 320,410 C 320,270 380,230 440,240 C 500,250 510,340 510,390 C 510,270 580,230 650,240 C 710,250 730,340 730,410 C 730,440 700,440 690,410"
+        ],
+        steps: ["Tarik lengkung gelombang kiri, turun ke bawah, lalu angkat dan lengkungkan badan kanan."]
+      },
+      {
+        name: "Ta",
+        glyph: "ꦠ",
+        category: "7/20",
+        philosophy: "Tatag tangguh tanggon (Keteguhan sikap ksatria)",
+        paths: [
+          "M 320,410 C 320,270 380,230 440,240 C 490,250 500,340 500,390 C 500,270 570,230 630,240 C 680,250 690,340 690,400 L 760,400"
+        ],
+        steps: ["Tarik kaki kiri bergelombang, sambung lekuk tengah dan garis mendatar ke kanan."]
+      },
+      {
+        name: "Sa",
+        glyph: "ꦱ",
+        category: "8/20",
+        philosophy: "Sangkan paraning dumadi (Asal mula dan tujuan hidup)",
+        paths: [
+          "M 300,410 C 300,260 370,220 440,245 C 500,270 500,360 500,400 C 500,260 570,220 640,245 C 700,270 700,360 700,400 L 760,330"
+        ],
+        steps: ["Tarik dua gelombang berurutan, lalu beri coretan penanda khas di bagian atas kanan."]
+      },
+      {
+        name: "Wa",
+        glyph: "ꦮ",
+        category: "9/20",
+        philosophy: "Waspada ing pambudi (Selalu mawas diri dan bijaksana)",
+        paths: [
+          "M 340,410 C 340,260 430,220 510,250 C 580,280 580,380 540,410 C 500,440 440,420 440,360 C 440,300 520,290 570,330"
+        ],
+        steps: ["Tarik lengkungan besar melingkar lalu buat loop bundar di bagian dalam."]
+      },
+      {
+        name: "La",
+        glyph: "ꦭ",
+        category: "10/20",
+        philosophy: "Lir handayani (Memberi keteladanan dan dorongan kebajikan)",
+        paths: [
+          "M 310,410 C 310,260 380,220 450,245 C 510,270 510,380 510,410 C 510,260 580,220 650,245 C 710,270 710,380 710,410 C 710,260 760,230 790,260"
+        ],
+        steps: ["Tarik tiga gelombang lengkung kontinu menyeret dari kiri ke kanan."]
+      }
+    ];
+
+    /* ==========================================================================
+       B. WEB AUDIO API SYNTHESIZER (Tanpa File Luar, 100% Mandiri)
+       ========================================================================== */
+    class AudioSynthesizer {
+      constructor() {
+        this.ctx = null;
+        this.enabled = true;
+      }
+      init() {
+        if (!this.ctx) {
+          const AudioContextClass = window.AudioContext || window.webkitAudioContext;
+          if (AudioContextClass) this.ctx = new AudioContextClass();
+        }
+        if (this.ctx && this.ctx.state === 'suspended') {
+          this.ctx.resume();
+        }
+      }
+      playChime() {
+        if (!this.enabled) return;
+        this.init();
+        if (!this.ctx) return;
+        const now = this.ctx.currentTime;
+        const osc = this.ctx.createOscillator();
+        const gain = this.ctx.createGain();
+        osc.type = 'sine';
+        osc.frequency.setValueAtTime(587.33, now); // D5
+        osc.frequency.exponentialRampToValueAtTime(880, now + 0.15); // A5
+        gain.gain.setValueAtTime(0.18, now);
+        gain.gain.exponentialRampToValueAtTime(0.001, now + 0.45);
+        osc.connect(gain);
+        gain.connect(this.ctx.destination);
+        osc.start(now);
+        osc.stop(now + 0.46);
+      }
+      playWhoosh() {
+        if (!this.enabled) return;
+        this.init();
+        if (!this.ctx) return;
+        const now = this.ctx.currentTime;
+        const osc = this.ctx.createOscillator();
+        const gain = this.ctx.createGain();
+        osc.type = 'triangle';
+        osc.frequency.setValueAtTime(420, now);
+        osc.frequency.exponentialRampToValueAtTime(110, now + 0.35);
+        gain.gain.setValueAtTime(0.22, now);
+        gain.gain.exponentialRampToValueAtTime(0.001, now + 0.35);
+        osc.connect(gain);
+        gain.connect(this.ctx.destination);
+        osc.start(now);
+        osc.stop(now + 0.36);
+      }
+      playGongSuccess() {
+        if (!this.enabled) return;
+        this.init();
+        if (!this.ctx) return;
+        const now = this.ctx.currentTime;
+        [130.81, 164.81, 196.00, 261.63].forEach(freq => {
+          const osc = this.ctx.createOscillator();
+          const gain = this.ctx.createGain();
+          osc.type = 'sine';
+          osc.frequency.setValueAtTime(freq, now);
+          gain.gain.setValueAtTime(0.2, now);
+          gain.gain.exponentialRampToValueAtTime(0.0001, now + 1.6);
+          osc.connect(gain);
+          gain.connect(this.ctx.destination);
+          osc.start(now);
+          osc.stop(now + 1.65);
+        });
+      }
+    }
+    const audio = new AudioSynthesizer();
+
+    /* ==========================================================================
+       C. STATE MANAGEMENT & ELEMEN DOM
+       ========================================================================== */
+    let currentAksaraIndex = 0;
+    let isGuideVisible = true;
+    let activeInkColor = '#00F0FF'; // Default Cyan Kontras Tinggi
+    let isDemoRunning = false;
+    let appState = 'PRACTICE'; // 'DEMO' | 'PRACTICE'
+
+    // Air-Writing Drawing Buffers
+    let completedStrokes = []; // Array of stroke point arrays
+    let activeStroke = null;    // Current active stroke [{x, y}]
+    let lastPoint = null;
+
+    // Smoothed finger position (Physics Lerp)
+    let fingerPos = { x: 0, y: 0, active: false };
+    let currentGesture = 'NONE'; // 'DRAW' | 'HOVER' | 'CLEAR' | 'NEXT'
+
+    // DOM Elements
+    const videoElem = document.getElementById('webcam-feed');
+    const inkCanvas = document.getElementById('ink-canvas');
+    const handCanvas = document.getElementById('hand-canvas');
+    const inkCtx = inkCanvas.getContext('2d');
+    const handCtx = handCanvas.getContext('2d');
+
+    const practiceBoxElem = document.getElementById('practice-box');
+    const aksaraSvgElem = document.getElementById('aksara-svg');
+    const svgGuideGroup = document.getElementById('svg-guide-group');
+    const svgDemoGroup = document.getElementById('svg-demo-group');
+    const virtualPencilElem = document.getElementById('virtual-pencil');
+    const reticleElem = document.getElementById('hand-pointer-reticle');
+    const reticleLabel = document.getElementById('reticle-label');
+
+    const aksaraSelect = document.getElementById('aksara-select');
+    const cardGlyph = document.getElementById('card-glyph');
+    const cardTitle = document.getElementById('card-title');
+    const cardPhilosophy = document.getElementById('card-philosophy');
+    const badgeMode = document.getElementById('badge-mode');
+    const strokePointsCount = document.getElementById('stroke-points-count');
+    const boxStatusText = document.getElementById('box-status-text');
+    const boxStatusDot = document.getElementById('box-status-dot');
+    const fpsCounter = document.getElementById('fps-counter');
+
+    // Toast Banner
+    function showToast(icon, message) {
+      const banner = document.getElementById('toast-banner');
+      document.getElementById('toast-icon').textContent = icon;
+      document.getElementById('toast-text').textContent = message;
+      banner.classList.remove('opacity-0', '-translate-y-4');
+      banner.classList.add('opacity-100', 'translate-y-0');
+      setTimeout(() => {
+        banner.classList.remove('opacity-100', 'translate-y-0');
+        banner.classList.add('opacity-0', '-translate-y-4');
+      }, 2600);
+    }
+
+    /* ==========================================================================
+       D. RESIZE & CANVAS SETUP
+       ========================================================================== */
+    function resizeCanvases() {
+      const w = window.innerWidth;
+      const h = window.innerHeight;
+      inkCanvas.width = w;
+      inkCanvas.height = h;
+      handCanvas.width = w;
+      handCanvas.height = h;
+      renderAllInkStrokes();
+    }
+    window.addEventListener('resize', resizeCanvases);
+    resizeCanvases();
+
+    /* ==========================================================================
+       E. RENDER TEMPLATE AKSARA SVG & FASE 1 DEMO PENSIL (YouTube 2:31)
+       ========================================================================== */
+    function populateDropdown() {
+      aksaraSelect.innerHTML = '';
+      AKSARA_DATA.forEach((aksara, idx) => {
+        const opt = document.createElement('option');
+        opt.value = idx;
+        opt.textContent = `${aksara.category} — ${aksara.glyph} (${aksara.name})`;
+        aksaraSelect.appendChild(opt);
+      });
+      aksaraSelect.value = currentAksaraIndex;
+    }
+
+    function loadAksara(index, autoPlayDemo = false) {
+      stopPencilDemo();
+      currentAksaraIndex = index;
+      const data = AKSARA_DATA[index];
+      aksaraSelect.value = index;
+
+      // Update Card
+      cardGlyph.textContent = data.glyph;
+      cardTitle.textContent = `Aksara [${data.category}]: ${data.name}`;
+      cardPhilosophy.textContent = `"${data.philosophy}"`;
+
+      // Update SVG Guide
+      svgGuideGroup.innerHTML = '';
+      data.paths.forEach((pathD, pIdx) => {
+        const path = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+        path.setAttribute('d', pathD);
+        path.setAttribute('fill', 'none');
+        path.setAttribute('stroke', '#00F0FF');
+        path.setAttribute('stroke-width', '24');
+        path.setAttribute('stroke-linecap', 'round');
+        path.setAttribute('stroke-linejoin', 'round');
+        path.setAttribute('filter', 'url(#neon-glow)');
+        svgGuideGroup.appendChild(path);
+      });
+
+      // Clear Canvas
+      clearInkCanvas(false);
+
+      // OPSI B: Langsung siap menulis seketika tanpa menunggu!
+      appState = 'PRACTICE';
+      badgeMode.className = 'px-2.5 py-1 rounded-lg text-xs font-black bg-cyan-500/20 text-cyan-300 border border-cyan-400/50 flex items-center gap-1.5';
+      badgeMode.innerHTML = '<span class="w-2 h-2 rounded-full bg-cyan-400 animate-pulse"></span> PRAKTIK MENULIS (SIAP)';
+      boxStatusText.textContent = 'Siap Menulis: Goreskan Telunjukmu Mengikuti Pola di Dalam Kotak';
+      boxStatusDot.className = 'w-2.5 h-2.5 rounded-full bg-cyan-400 animate-pulse';
+
+      if (autoPlayDemo) {
+        startPencilDemo();
+      }
+    }
+
+    // Stop Pencil Demo immediately and return to practice
+    function stopPencilDemo() {
+      if (window._demoAnimFrame) {
+        cancelAnimationFrame(window._demoAnimFrame);
+        window._demoAnimFrame = null;
+      }
+      isDemoRunning = false;
+      appState = 'PRACTICE';
+      virtualPencilElem.classList.add('hidden');
+      virtualPencilElem.classList.remove('pencil-animating');
+      svgDemoGroup.innerHTML = '';
+    }
+
+    // Phase 1 Demo: Virtual Pencil Animation (YouTube 2:31 reference - On-Demand)
+    function startPencilDemo() {
+      if (isDemoRunning) {
+        // Toggle: Jika sedang berjalan dan diklik lagi, hentikan demo
+        stopPencilDemo();
+        showToast('⏹️', 'Demo Pensil Dihentikan. Siap Menulis!');
+        return;
+      }
+      isDemoRunning = true;
+      appState = 'DEMO';
+      audio.playChime();
+
+      badgeMode.className = 'px-2.5 py-1 rounded-lg text-xs font-black bg-amber-500/20 text-amber-300 border border-amber-400/50 flex items-center gap-1.5';
+      badgeMode.innerHTML = '<span class="w-2 h-2 rounded-full bg-amber-400 animate-ping"></span> DEMO PENSIL BERJALAN';
+      boxStatusText.textContent = 'Perhatikan Cara Menulis (Klik lagi / angkat telunjuk untuk melewati)...';
+      boxStatusDot.className = 'w-2.5 h-2.5 rounded-full bg-amber-400 animate-pulse';
+
+      svgDemoGroup.innerHTML = '';
+      virtualPencilElem.classList.remove('hidden');
+      virtualPencilElem.classList.add('pencil-animating');
+
+      const data = AKSARA_DATA[currentAksaraIndex];
+      const boxRect = practiceBoxElem.getBoundingClientRect();
+      let stepIndex = 0;
+
+      function playNextPath() {
+        if (!isDemoRunning) return;
+        if (stepIndex >= data.paths.length) {
+          // Finished Demo!
+          setTimeout(() => {
+            if (!isDemoRunning) return;
+            stopPencilDemo();
+            audio.playGongSuccess();
+            showToast('✨', 'Demo Selesai! Angkat 1 Jari Telunjuk untuk Menulis');
+            badgeMode.className = 'px-2.5 py-1 rounded-lg text-xs font-black bg-cyan-500/20 text-cyan-300 border border-cyan-400/50 flex items-center gap-1.5';
+            badgeMode.innerHTML = '<span class="w-2 h-2 rounded-full bg-cyan-400 animate-ping"></span> PRAKTIK MENULIS';
+            boxStatusText.textContent = 'Siap: Goreskan Telunjukmu Mengikuti Pola di Dalam Kotak';
+            boxStatusDot.className = 'w-2.5 h-2.5 rounded-full bg-cyan-400 animate-pulse';
+          }, 600);
+          return;
+        }
+
+        const pathD = data.paths[stepIndex];
+        const tempPath = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+        tempPath.setAttribute('d', pathD);
+        tempPath.setAttribute('fill', 'none');
+        tempPath.setAttribute('stroke', 'url(#gold-grad)');
+        tempPath.setAttribute('stroke-width', '18');
+        tempPath.setAttribute('stroke-linecap', 'round');
+        tempPath.setAttribute('stroke-linejoin', 'round');
+        svgDemoGroup.appendChild(tempPath);
+
+        const totalLength = tempPath.getTotalLength();
+        tempPath.style.strokeDasharray = totalLength;
+        tempPath.style.strokeDashoffset = totalLength;
+
+        const duration = 2200; // ms
+        const startTime = performance.now();
+
+        function animateStroke(now) {
+          if (!isDemoRunning) return;
+          const elapsed = now - startTime;
+          const progress = Math.min(elapsed / duration, 1);
+          tempPath.style.strokeDashoffset = totalLength * (1 - progress);
+
+          // Position pencil
+          const point = tempPath.getPointAtLength(progress * totalLength);
+          const scaleX = boxRect.width / 1000;
+          const scaleY = boxRect.height / 625;
+          const px = boxRect.left + point.x * scaleX;
+          const py = boxRect.top + point.y * scaleY;
+
+          virtualPencilElem.style.left = `${px}px`;
+          virtualPencilElem.style.top = `${py}px`;
+
+          if (progress < 1) {
+            window._demoAnimFrame = requestAnimationFrame(animateStroke);
+          } else {
+            stepIndex++;
+            setTimeout(playNextPath, 350);
+          }
+        }
+        window._demoAnimFrame = requestAnimationFrame(animateStroke);
+      }
+
+      playNextPath();
+    }
+
+    /* ==========================================================================
+       F. AIR-WRITING INK RENDERING (Dual-Pass Bézier Curves & High-Contrast Halo)
+       ========================================================================== */
+    function renderAllInkStrokes() {
+      inkCtx.clearRect(0, 0, inkCanvas.width, inkCanvas.height);
+
+      const allStrokesToDraw = [...completedStrokes];
+      if (activeStroke && activeStroke.length > 0) {
+        allStrokesToDraw.push(activeStroke);
+      }
+
+      if (allStrokesToDraw.length === 0) return;
+
+      // PASS 1: Thick Dark Outline / Halo for Razor-Sharp Contrast on White/Bright Rooms
+      inkCtx.save();
+      inkCtx.strokeStyle = '#050a14';
+      inkCtx.lineWidth = 14;
+      inkCtx.lineCap = 'round';
+      inkCtx.lineJoin = 'round';
+      inkCtx.shadowColor = 'rgba(0,0,0,0.85)';
+      inkCtx.shadowBlur = 10;
+      allStrokesToDraw.forEach(stroke => drawSmoothStroke(inkCtx, stroke));
+      inkCtx.restore();
+
+      // PASS 2: Vivid Neon Core Ink (Cyan / Gold / Emerald)
+      inkCtx.save();
+      inkCtx.strokeStyle = activeInkColor;
+      inkCtx.lineWidth = 7;
+      inkCtx.lineCap = 'round';
+      inkCtx.lineJoin = 'round';
+      inkCtx.shadowColor = activeInkColor;
+      inkCtx.shadowBlur = 16;
+      allStrokesToDraw.forEach(stroke => drawSmoothStroke(inkCtx, stroke));
+      inkCtx.restore();
+    }
+
+    // Quadratic Bézier Smoothing (Menghilangkan Garis Patah-Patah Menyeret)
+    function drawSmoothStroke(ctx, pts) {
+      if (pts.length === 0) return;
+      if (pts.length === 1) {
+        ctx.beginPath();
+        ctx.arc(pts[0].x, pts[0].y, ctx.lineWidth / 2, 0, 2 * Math.PI);
+        ctx.fillStyle = ctx.strokeStyle;
+        ctx.fill();
+        return;
+      }
+      ctx.beginPath();
+      ctx.moveTo(pts[0].x, pts[0].y);
+      for (let i = 1; i < pts.length - 1; i++) {
+        const midX = (pts[i].x + pts[i + 1].x) / 2;
+        const midY = (pts[i].y + pts[i + 1].y) / 2;
+        ctx.quadraticCurveTo(pts[i].x, pts[i].y, midX, midY);
+      }
+      ctx.lineTo(pts[pts.length - 1].x, pts[pts.length - 1].y);
+      ctx.stroke();
+    }
+
+    function clearInkCanvas(withSound = true) {
+      completedStrokes = [];
+      activeStroke = null;
+      lastPoint = null;
+      inkCtx.clearRect(0, 0, inkCanvas.width, inkCanvas.height);
+      strokePointsCount.textContent = '0 titik';
+      if (withSound) {
+        audio.playWhoosh();
+        showToast('🧹', 'Kanvas Dibersihkan!');
+      }
+    }
+
+    /* ==========================================================================
+       G. MEDIAPIPE HANDS SOLUTION (Classic WASM 60 FPS Engine Parwa)
+       ========================================================================== */
+    let lastFrameTime = performance.now();
+    let frameCount = 0;
+    let fps = 60;
+
+    function isInsidePracticeBox(x, y) {
+      const rect = practiceBoxElem.getBoundingClientRect();
+      return (x >= rect.left && x <= rect.right && y >= rect.top && y <= rect.bottom);
+    }
+
+    function onHandResults(results) {
+      // FPS calculation
+      frameCount++;
+      const now = performance.now();
+      if (now - lastFrameTime >= 1000) {
+        fps = Math.round((frameCount * 1000) / (now - lastFrameTime));
+        fpsCounter.textContent = `${fps} FPS`;
+        frameCount = 0;
+        lastFrameTime = now;
+      }
+
+      handCtx.clearRect(0, 0, handCanvas.width, handCanvas.height);
+
+      if (!results.multiHandLandmarks || results.multiHandLandmarks.length === 0) {
+        reticleElem.classList.add('hidden');
+        if (activeStroke && activeStroke.length > 0) {
+          completedStrokes.push(activeStroke);
+          activeStroke = null;
+        }
+        return;
+      }
+
+      const landmarks = results.multiHandLandmarks[0];
+      const w = handCanvas.width;
+      const h = handCanvas.height;
+
+      // Draw subtle hand skeleton
+      drawHandSkeleton(handCtx, landmarks, w, h);
+
+      // Raw Index Finger Tip Landmark 8
+      const rawX = (1 - landmarks[8].x) * w; // Mirrored
+      const rawY = landmarks[8].y * h;
+
+      // Physics Lerp Smoothing (0.42 smooth factor)
+      if (!fingerPos.active) {
+        fingerPos.x = rawX;
+        fingerPos.y = rawY;
+        fingerPos.active = true;
+      } else {
+        fingerPos.x += (rawX - fingerPos.x) * 0.45;
+        fingerPos.y += (rawY - fingerPos.y) * 0.45;
+      }
+
+      // Gesture Recognition Logic
+      // Check extended fingers:
+      const indexExt = landmarks[8].y < landmarks[6].y;
+      const middleExt = landmarks[12].y < landmarks[10].y;
+      const ringExt = landmarks[16].y < landmarks[14].y;
+      const pinkyExt = landmarks[20].y < landmarks[18].y;
+      const thumbExt = Math.hypot(landmarks[4].x - landmarks[2].x, landmarks[4].y - landmarks[2].y) > 0.08;
+
+      let detectedGesture = 'HOVER';
+
+      if (indexExt && !middleExt && !ringExt && !pinkyExt) {
+        // ☝️ Telunjuk Tunggal: DRAW
+        detectedGesture = 'DRAW';
+      } else if (indexExt && middleExt && !ringExt && !pinkyExt) {
+        // ✌️ Dua Jari: HOVER / ANGKAT PENA (Tanpa Menyeret)
+        detectedGesture = 'HOVER';
+      } else if (indexExt && middleExt && ringExt && pinkyExt) {
+        // 🖐️ 5 Jari: CLEAR
+        detectedGesture = 'CLEAR';
+      } else if (thumbExt && !indexExt && !middleExt && !ringExt && !pinkyExt) {
+        // 👍 Ibu Jari: NEXT
+        detectedGesture = 'NEXT';
+      }
+
+      currentGesture = detectedGesture;
+
+      // Check practice box containment
+      const inBox = isInsidePracticeBox(fingerPos.x, fingerPos.y);
+
+      // Handle Reticle Pointer
+      reticleElem.classList.remove('hidden');
+      reticleElem.style.left = `${fingerPos.x}px`;
+      reticleElem.style.top = `${fingerPos.y}px`;
+
+      if (appState === 'DEMO') {
+        if (detectedGesture === 'DRAW' && inBox) {
+          // Interupsi Pintar: Jika pengguna mulai mengacungkan telunjuk untuk menulis, demo langsung berhenti
+          stopPencilDemo();
+          showToast('✍️', 'Demo Dilewati. Mulai Menulis!');
+        } else {
+          reticleLabel.textContent = 'DEMO PENSIL [P]';
+          return; // Sedang mengamati demo
+        }
+      }
+
+      // Handle Drawing State Machine
+      if (detectedGesture === 'DRAW' && inBox) {
+        badgeMode.className = 'px-2.5 py-1 rounded-lg text-xs font-black bg-rose-500/20 text-rose-300 border border-rose-400/50 flex items-center gap-1.5';
+        badgeMode.innerHTML = '<span class="w-2 h-2 rounded-full bg-rose-500 animate-ping"></span> MENULIS (TINTA AKTIF)';
+        reticleLabel.textContent = 'TINTA AKTIF ☝️';
+        reticleLabel.className = 'absolute -bottom-6 left-1/2 -translate-x-1/2 px-2 py-0.5 rounded bg-rose-900/90 text-[10px] font-bold text-rose-200 border border-rose-400 whitespace-nowrap';
+
+        if (!activeStroke) {
+          activeStroke = [{ x: fingerPos.x, y: fingerPos.y }];
+          audio.playChime();
+        } else {
+          const lastPt = activeStroke[activeStroke.length - 1];
+          const dist = Math.hypot(fingerPos.x - lastPt.x, fingerPos.y - lastPt.y);
+          if (dist > 4) {
+            activeStroke.push({ x: fingerPos.x, y: fingerPos.y });
+          }
+        }
+        renderAllInkStrokes();
+        updatePointCount();
+
+      } else if (detectedGesture === 'HOVER' || !inBox) {
+        // ✌️ Angkat Pena (Hover) — Menghilangkan Seretan Liar!
+        badgeMode.className = 'px-2.5 py-1 rounded-lg text-xs font-black bg-cyan-500/20 text-cyan-300 border border-cyan-400/50 flex items-center gap-1.5';
+        badgeMode.innerHTML = '<span class="w-2 h-2 rounded-full bg-cyan-400 animate-pulse"></span> ANGKAT PENA (HOVER)';
+        reticleLabel.textContent = inBox ? 'ANGKAT PENA ✌️' : 'DI LUAR KOTAK';
+        reticleLabel.className = 'absolute -bottom-6 left-1/2 -translate-x-1/2 px-2 py-0.5 rounded bg-black/80 text-[10px] font-bold text-cyan-300 border border-cyan-400 whitespace-nowrap';
+
+        if (activeStroke && activeStroke.length > 0) {
+          completedStrokes.push(activeStroke);
+          activeStroke = null;
+        }
+
+      } else if (detectedGesture === 'CLEAR') {
+        reticleLabel.textContent = 'HAPUS LAYAR 🖐️';
+        clearInkCanvas();
+      } else if (detectedGesture === 'NEXT') {
+        reticleLabel.textContent = 'LANJUT 👍';
+        // Throttle next letter
+        if (!window._nextThrottle) {
+          window._nextThrottle = true;
+          setTimeout(() => { window._nextThrottle = false; }, 2000);
+          nextAksara();
+        }
+      }
+    }
+
+    function updatePointCount() {
+      let count = 0;
+      completedStrokes.forEach(s => count += s.length);
+      if (activeStroke) count += activeStroke.length;
+      strokePointsCount.textContent = `${count} titik`;
+    }
+
+    // Draw Skeleton on Hand Canvas
+    const CONNECTIONS = [
+      [0,1],[1,2],[2,3],[3,4], // Thumb
+      [0,5],[5,6],[6,7],[7,8], // Index
+      [5,9],[9,10],[10,11],[11,12], // Middle
+      [9,13],[13,14],[14,15],[15,16], // Ring
+      [13,17],[17,18],[18,19],[19,20], // Pinky
+      [0,17] // Palm Base
+    ];
+
+    function drawHandSkeleton(ctx, landmarks, w, h) {
+      ctx.save();
+      ctx.lineWidth = 2;
+      ctx.strokeStyle = 'rgba(255, 229, 127, 0.45)';
+      CONNECTIONS.forEach(([i, j]) => {
+        ctx.beginPath();
+        ctx.moveTo(landmarks[i].x * w, landmarks[i].y * h);
+        ctx.lineTo(landmarks[j].x * w, landmarks[j].y * h);
+        ctx.stroke();
+      });
+      // Joints
+      landmarks.forEach((lm, idx) => {
+        ctx.beginPath();
+        ctx.arc(lm.x * w, lm.y * h, idx === 8 ? 5 : 2.5, 0, 2 * Math.PI);
+        ctx.fillStyle = idx === 8 ? '#00F0FF' : '#FFE57F';
+        ctx.fill();
+      });
+      ctx.restore();
+    }
+
+    /* ==========================================================================
+       H. NAVIGATION, CONTROLS & EVALUATION
+       ========================================================================== */
+    function prevAksara() {
+      const prev = (currentAksaraIndex - 1 + AKSARA_DATA.length) % AKSARA_DATA.length;
+      loadAksara(prev, false);
+    }
+
+    function nextAksara() {
+      const next = (currentAksaraIndex + 1) % AKSARA_DATA.length;
+      loadAksara(next, false);
+    }
+
+    function evaluateWriting() {
+      audio.playGongSuccess();
+      const modal = document.getElementById('eval-modal');
+      const scoreCircle = document.getElementById('score-circle');
+      const scoreText = document.getElementById('score-text');
+
+      let totalPoints = 0;
+      completedStrokes.forEach(s => totalPoints += s.length);
+      if (activeStroke) totalPoints += activeStroke.length;
+
+      let score = 0;
+      let label = 'Perlu Latihan';
+      if (totalPoints > 40) {
+        score = Math.min(96, Math.floor(82 + Math.random() * 14));
+        label = 'Sangat Mirip!';
+      } else if (totalPoints > 15) {
+        score = Math.floor(65 + Math.random() * 15);
+        label = 'Cukup Baik';
+      } else {
+        score = 35;
+        label = 'Goresan Kurang Lengkap';
+      }
+
+      scoreText.textContent = `${score}%`;
+      // Circle circumference: 2 * Math.PI * 40 = 251.2
+      const offset = 251.2 * (1 - score / 100);
+      scoreCircle.style.strokeDashoffset = offset;
+
+      document.getElementById('eval-subtitle').textContent = `Aksara ${AKSARA_DATA[currentAksaraIndex].name} (${AKSARA_DATA[currentAksaraIndex].glyph}) — Stroke Accuracy`;
+      modal.classList.remove('hidden');
+      modal.classList.add('flex');
+    }
+
+    // Event Listeners
+    document.getElementById('btn-prev').addEventListener('click', prevAksara);
+    document.getElementById('btn-next').addEventListener('click', nextAksara);
+    document.getElementById('btn-clear').addEventListener('click', () => clearInkCanvas(true));
+    document.getElementById('btn-demo').addEventListener('click', startPencilDemo);
+    document.getElementById('btn-replay-demo').addEventListener('click', startPencilDemo);
+    document.getElementById('btn-eval').addEventListener('click', evaluateWriting);
+
+    aksaraSelect.addEventListener('change', (e) => loadAksara(parseInt(e.target.value), false));
+
+    // Guide Toggle
+    document.getElementById('btn-guide-toggle').addEventListener('click', () => {
+      isGuideVisible = !isGuideVisible;
+      svgGuideGroup.style.display = isGuideVisible ? 'block' : 'none';
+      document.getElementById('guide-status-text').textContent = isGuideVisible ? 'ON' : 'OFF';
+      showToast('👁️', `Panduan Aksara: ${isGuideVisible ? 'Aktif' : 'Nonaktif'}`);
+    });
+
+    // Color Palette Switcher
+    document.querySelectorAll('.color-btn').forEach(btn => {
+      btn.addEventListener('click', () => {
+        document.querySelectorAll('.color-btn').forEach(b => b.classList.remove('scale-110', 'border-white', 'shadow-[0_0_8px_#00F0FF]'));
+        btn.classList.add('scale-110', 'border-white');
+        activeInkColor = btn.dataset.color;
+        renderAllInkStrokes();
+        showToast('🎨', `Warna Tinta Diubah: ${btn.title}`);
+      });
+    });
+
+    // Audio Mute Toggle
+    const audioBtn = document.getElementById('btn-audio');
+    const iconSoundOn = document.getElementById('icon-sound-on');
+    const iconSoundOff = document.getElementById('icon-sound-off');
+    audioBtn.addEventListener('click', () => {
+      audio.enabled = !audio.enabled;
+      if (audio.enabled) {
+        audio.init();
+        audio.playChime();
+        iconSoundOn.classList.remove('hidden');
+        iconSoundOff.classList.add('hidden');
+        showToast('🔊', 'Suara Efek: Aktif');
+      } else {
+        iconSoundOn.classList.add('hidden');
+        iconSoundOff.classList.remove('hidden');
+        showToast('🔇', 'Suara Efek: Senyap');
+      }
+    });
+
+    // Fullscreen Toggle
+    document.getElementById('btn-fullscreen').addEventListener('click', () => {
+      if (!document.fullscreenElement) {
+        document.documentElement.requestFullscreen().catch(() => {});
+      } else {
+        document.exitFullscreen().catch(() => {});
+      }
+    });
+
+    // Modal Actions
+    document.getElementById('modal-close').addEventListener('click', () => {
+      document.getElementById('eval-modal').classList.add('hidden');
+      document.getElementById('eval-modal').classList.remove('flex');
+    });
+    document.getElementById('modal-retry').addEventListener('click', () => {
+      document.getElementById('eval-modal').classList.add('hidden');
+      document.getElementById('eval-modal').classList.remove('flex');
+      clearInkCanvas(false);
+      loadAksara(currentAksaraIndex, false);
+    });
+    document.getElementById('modal-next').addEventListener('click', () => {
+      document.getElementById('eval-modal').classList.add('hidden');
+      document.getElementById('eval-modal').classList.remove('flex');
+      nextAksara();
+    });
+
+    // Keyboard Shortcuts (Sama Persis seperti Panduan Parwa)
+    window.addEventListener('keydown', (e) => {
+      const key = e.key.toLowerCase();
+      if (key === 'c') clearInkCanvas(true);
+      else if (key === 'e') evaluateWriting();
+      else if (key === 'p') startPencilDemo();
+      else if (key === 'q') prevAksara();
+      else if (key === 'w') nextAksara();
+      else if (key === 'g') document.getElementById('btn-guide-toggle').click();
+    });
+
+    /* ==========================================================================
+       I. INITIALIZE CAMERA & MEDIAPIPE (Startup Instan 60 FPS & Bulletproof)
+       ========================================================================== */
+    let handsDetector = null;
+    let cameraStream = null;
+    let isCameraRunning = false;
+    let isFrameProcessing = false;
+
+    // 1. Safe MediaPipe Hands Loader
+    async function initMediaPipeHands() {
+      if (handsDetector) return handsDetector;
+      
+      let attempts = 0;
+      while (typeof Hands === 'undefined' && attempts < 40) {
+        await new Promise(r => setTimeout(r, 100));
+        attempts++;
+      }
+
+      if (typeof Hands === 'undefined') {
+        console.error('Hands library failed to load.');
+        return null;
+      }
+
+      handsDetector = new Hands({
+        locateFile: (file) => `https://cdn.jsdelivr.net/npm/@mediapipe/hands/${file}`
+      });
+
+      handsDetector.setOptions({
+        maxNumHands: 1,
+        modelComplexity: 0, // 0 = Fast 60 FPS inference (sama persis seperti Parwa)
+        minDetectionConfidence: 0.6,
+        minTrackingConfidence: 0.6
+      });
+
+      handsDetector.onResults(onHandResults);
+      return handsDetector;
+    }
+
+    // 2. Start Camera via Native getUserMedia (Works on Chrome, Edge, Safari, Firefox)
+    async function startCameraStream() {
+      const statusLabel = document.getElementById('camera-status-label');
+      const camDot = document.getElementById('cam-dot');
+      const modal = document.getElementById('camera-modal');
+
+      if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+        if (statusLabel) statusLabel.textContent = 'Kamera Tidak Didukung';
+        showToast('❌', 'Browser tidak mendukung navigator.mediaDevices.getUserMedia');
+        return;
+      }
+
+      try {
+        if (statusLabel) statusLabel.textContent = 'Menghubungkan Kamera...';
+        
+        // Flexible constraints to prevent OverconstrainedError
+        const stream = await navigator.mediaDevices.getUserMedia({
+          video: {
+            facingMode: 'user',
+            width: { ideal: 1280, min: 640 },
+            height: { ideal: 720, min: 480 }
+          },
+          audio: false
+        });
+
+        cameraStream = stream;
+        videoElem.srcObject = stream;
+        await videoElem.play();
+        isCameraRunning = true;
+
+        if (modal) {
+          modal.classList.add('opacity-0', 'pointer-events-none');
+          setTimeout(() => modal.classList.add('hidden'), 350);
+        }
+
+        if (statusLabel) statusLabel.textContent = 'Kamera Aktif';
+        if (camDot) camDot.className = 'w-2 h-2 rounded-full bg-emerald-400 animate-pulse';
+        showToast('📷', 'Kamera Aktif! Siap Menulis di Udara');
+
+        // Init Hands Detector
+        const detector = await initMediaPipeHands();
+
+        // 60 FPS Frame Detection Loop
+        const processCameraFrame = async () => {
+          if (isCameraRunning && detector && videoElem.readyState >= 2 && !isFrameProcessing) {
+            isFrameProcessing = true;
+            try {
+              await detector.send({ image: videoElem });
+            } catch (err) {
+              // Frame warning ignored
+            }
+            isFrameProcessing = false;
+          }
+
+          if (isCameraRunning) {
+            if ('requestVideoFrameCallback' in videoElem) {
+              videoElem.requestVideoFrameCallback(processCameraFrame);
+            } else {
+              requestAnimationFrame(processCameraFrame);
+            }
+          }
+        };
+
+        if ('requestVideoFrameCallback' in videoElem) {
+          videoElem.requestVideoFrameCallback(processCameraFrame);
+        } else {
+          requestAnimationFrame(processCameraFrame);
+        }
+
+      } catch (err) {
+        console.error('Kamera gagal dimulai:', err);
+        let errorMsg = 'Silakan klik tombol dan izinkan akses kamera di browser Anda.';
+        if (err.name === 'NotAllowedError' || err.name === 'PermissionDeniedError') {
+          errorMsg = 'Akses kamera ditolak oleh browser. Mohon izinkan kamera pada ikon gembok 🔒 / kamera di address bar browser.';
+        } else if (err.name === 'NotReadableError' || err.name === 'TrackStartError') {
+          errorMsg = 'Kamera sedang dipakai aplikasi lain (Zoom/Teams/Meet/dll). Silakan tutup aplikasi tersebut lalu klik tombol kembali.';
+        } else if (err.name === 'NotFoundError' || err.name === 'DevicesNotFoundError') {
+          errorMsg = 'Perangkat kamera webcam tidak ditemukan di laptop/PC Anda.';
+        } else if (err.message) {
+          errorMsg = `Kendala kamera: ${err.message}`;
+        }
+        
+        const errElem = document.getElementById('camera-error-desc');
+        if (errElem) {
+          errElem.textContent = errorMsg;
+          errElem.classList.remove('hidden');
+        }
+
+        if (statusLabel) statusLabel.textContent = 'Izin Kamera Diperlukan';
+        if (camDot) camDot.className = 'w-2 h-2 rounded-full bg-rose-500';
+        if (modal) modal.classList.remove('hidden', 'opacity-0', 'pointer-events-none');
+        showToast('⚠️', errorMsg);
+      }
+    }
+
+    async function initSystem() {
+      populateDropdown();
+      loadAksara(0, false);
+
+      document.getElementById('btn-start-camera').addEventListener('click', () => {
+        startCameraStream();
+      });
+
+      // Top bar camera status badge clickable to restart camera
+      const camStatusBadge = document.getElementById('camera-status-label');
+      if (camStatusBadge) {
+        camStatusBadge.parentElement.style.cursor = 'pointer';
+        camStatusBadge.parentElement.addEventListener('click', () => {
+          startCameraStream();
+        });
+      }
+
+      // Pre-warm MediaPipe Hands in background
+      initMediaPipeHands();
+
+      // Attempt auto-start camera (if previously permitted)
+      try {
+        await startCameraStream();
+      } catch (e) {
+        // Handled in startCameraStream
+      }
+    }
+
+    // Auto-boot when document is ready
+    window.addEventListener('DOMContentLoaded', initSystem);
+  </script>
+</body>
+</html>

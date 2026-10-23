@@ -1,0 +1,21 @@
+# Dependencies & environment
+node_modules/
+.env
+.venv/
+__pycache__/
+
+# Scratch scripts & temporary inspection dumps
+temp_*.js
+inspect_*.py
+dump_*.py
+parse_*.py
+extract_*.py
+check_*.py
+aksara_data_extracted.js
+parwa_index.html
+parwa_text_dump.txt
+
+# OS Files
+.DS_Store
+Thumbs.db
+*.log
